@@ -7,6 +7,8 @@ import asyncio
 import re
 import json
 import traceback
+import concurrent.futures
+
 
 import verifier
 from os.path import exists
@@ -21,9 +23,9 @@ rconPassword = ""
 rconAddress = ""
 token = ""
 
-minecraftConsoleParser = re.compile(r'''(?P<timestamp>\[\d{2}:\d{2}:\d{2}\]) \[(?P<thread>[^]\/]*)\/(?P<level>[^]\/]*\]): (<(?P<username>[^>]*)>)?(?P<message>.*)''')
+minecraftConsoleParser = re.compile(r'''(?P<timestamp>\[\d{2}:\d{2}:\d{2}\]) \[(?P<thread>[^]\/]*)\/(?P<level>[^]\/]*\]):( <(?P<username>[^>]*)> )?(?P<message>.*)''')
 
-userCountRe = re.compile(r'There are (\d+) of a max (\d+) players online')
+userCountRe = re.compile(r'[^\d]*(?P<online>\d+)[^\d]*(?P<max>\d+)')
 userCount = -1
 userMax = -1
 userList = None
@@ -36,17 +38,37 @@ outputLock = threading.Lock()
 
 guilds = []
 
+displayedWrongPassword = False
+displayedChannelError = False
+
+async def run_async(func, args):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, )
+
 def init_mcr():
+    global mcr, displayedWrongPassword, isConnected
+
     try:
-        global mcr
+        mcr.disconnect()
+    except:
+        pass
+
+    try:
         mcr = MCRcon(rconAddress, rconPassword)
         mcr.connect()
         l = mcr.command("list")
         print(l)
+        isConnected = True
         return True
     except Exception as e:
+        isConnected = False
         if isConnected:
             print("Could not connect to Minecraft RCON")
+
+        for arg in e.args:
+            if not displayedWrongPassword and arg == 'Login failed':
+                print("[Error] Wrong RCON password entered")
+                displayedWrongPassword = True
         return False
 
 def on_verification(pair):
@@ -87,36 +109,62 @@ async def idToDiscordNick(id):
 
 async def update_user_count():
     global userCount, userMax, isConnected
-    try:
-        response = mcr.command("list")
-        result = userCountRe.match(response)
-        if result.group(1) is not None and result.group(2) is not None:
-            newUserCount = result.group(1)
-            newUserMax = result.group(2)
 
-            isConnected = True
+    failure = True
+    executor = concurrent.futures.ThreadPoolExecutor()
 
-            if newUserMax != userMax or newUserCount != userCount:
-                userMax = newUserMax
-                userCount = newUserCount
-                status = f"server {userCount}/{userMax}"
-                await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=status))
-    except Exception as e:
+    if isConnected:
+        try:
+            future = executor.submit(mcr.command, 'list')
+            try:
+                response = future.result(timeout=5)
+            except concurrent.futures.TimeoutError as e:
+                raise TimeoutError("MC RCON call timed out")
+
+            executor.shutdown(wait=False, cancel_futures=True)
+
+            result = userCountRe.match(response)
+            if result is not None and result.group('online') is not None and result.group('max') is not None:
+                newUserCount = result.group('online')
+                newUserMax = result.group('max')
+
+                if newUserMax != userMax or newUserCount != userCount:
+                    userMax = newUserMax
+                    userCount = newUserCount
+                    status = f"server {userCount}/{userMax}"
+                    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name=status))
+
+                failure = False
+        except Exception as e:
+            if isConnected is None or isConnected:
+                print(f'[Error] update_user_count: {e}')
+
+    executor.shutdown(wait=False, cancel_futures=True)
+
+    if failure:
         if isConnected is None or isConnected:
-            print(e)
-            # await client.change_presence(activity=discord.Activity(type=discord.ActivityType., name="the waiting game..."))
-        await client.change_presence(status=discord.Status.idle, activity=discord.Activity(type=discord.ActivityType.playing, name="the waiting game..."))
+            await client.change_presence(status=discord.Status.idle, activity=discord.Game(name="the waiting game..."))
         init_mcr()
-        isConnected = False
 
 
-async def follow(thefile):
-    thefile.seek(0,2)
+
+
+async def follow(filePath):
+
+    logFP = None
     while True:
-        line = thefile.readline()
+        if logFP is None and isConnected:
+            logFP = open(filePath,'rt')
+            logFP.seek(0,2)
+        elif logFP is not None and not isConnected:
+            logFP.close()
+            logFP = None
+
+        line = logFP.readline() if logFP is not None else None
         if not line:
             await asyncio.sleep(0.1)
             continue
+
         yield line
 
 # def tokenizeMinecraftConsoleLine(line):
@@ -146,16 +194,24 @@ async def dcToMc(dcName):
         traceback.print_exc(type(e), e, e.__traceback__)
         return None
 
+def make_tellraw_for_code(username, code):
+    return f'tellraw {username} [{{"text":"Verify your Discord account with the code ", "color":"white"}}, {{"text":"{code}", "color":"green"}}, {{"text":" by DMing it to the bot. Your code will expire in 5 minutes", "color":"white"}}]'
+
 async def read_minecraft_server():
     print("Reading minecraft output")
-    logfile = open(pathToLogFile,'rt')
-    loglines = follow(logfile)
+    loglines = follow(pathToLogFile)
 
     async for line in loglines:
         print(line)
         parsed = minecraftConsoleParser.match(line)
-        username = parsed.group('username')
-        message = parsed.group('message')
+
+        username = None
+        message = None
+
+        if parsed is not None:
+            username = parsed.group('username')
+            message = parsed.group('message')
+
         if username is not None:
             if verifierMaster.hasCodes():
                 foundCodes = verifier.codeRe.findall(message)
@@ -165,15 +221,26 @@ async def read_minecraft_server():
                         if result.isCompleted():
                             on_verification(result)
                         else:
-                            result = mcr.command(mcr.command(f'tellraw {username} [{{"text":"Verify your Discord account with the code ", "color":"white"}}, {{"text":"{result.vDiscord.code}", "color":"green"}}, {{"text":" by DMing it to the bot. Your code will expire in 5 minutes", "color":"white"}}]'))
-                            print(result)
+                            try:
+                                result = mcr.command(make_tellraw_for_code(username, result.vDiscord.code))
+                                print(result)
+                            except Exception as e:
+                                print(f'[Error] failed to send verification message to {username}')
+                                print(e)
+
                         break
 
             if message.startswith("!verify"):
                 pair = verifier.VerificationPair(minecraftProfile=username, onVerification=on_verification)
                 verifierMaster.add(pair)
                 discordCode = pair.vDiscord.code
-                mcr.command(f"tell {username} Verify your Discord account with the code {discordCode} by DMing it to the bot. Your code will expire in 5 minutes")
+
+                try:
+                    mcr.command(make_tellraw_for_code(username, discordCode))
+                except Exception as e:
+                    print(f'[Error] failed to send verification message to {username}')
+                    print(e)
+
             else:
                 discordName = await mcToDc(username)
                 if discordName is None:
@@ -181,7 +248,13 @@ async def read_minecraft_server():
                 else:
                     nameToShow = f"[{discordName}]"
 
-                await client.get_channel(channelId).send(f"{nameToShow} {message}")
+                channel = client.get_channel(channelId)
+                global displayedChannelError
+                if channel is not None:
+                    await channel.send(f"{nameToShow} {message}")
+                elif not displayedChannelError:
+                    print(f'[Error] Could not find specified channel with channel id {channelId}')
+                    displayedChannelError = True
 
 @client.event
 async def on_ready():
@@ -247,9 +320,9 @@ if __name__ == '__main__':
         rconAddress = input("What is the RCON address")
         rconPassword = input("What is the RCON password")
         vars = {
-            "botId": botId,
+            "botId": int(botId),
             "token": token,
-            "channelId": channelId,
+            "channelId": int(channelId),
             "pathToLogFile": pathToLogFile,
             "rconAddress": rconAddress,
             "rconPassword": rconPassword
@@ -266,9 +339,6 @@ if __name__ == '__main__':
             pathToLogFile = vars["pathToLogFile"]
             rconAddress = vars["rconAddress"]
             rconPassword = vars["rconPassword"]
-
-    init_mcr()
-
 
     try:
         usersPath = "users.json"
