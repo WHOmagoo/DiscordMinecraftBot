@@ -24,7 +24,7 @@ rconAddress = ""
 token = ""
 
 minecraftConsoleParser = re.compile(r'''(?P<timestamp>\[\d{2}:\d{2}:\d{2}\]) \[(?P<thread>[^]\/]*)\/(?P<level>[^]\/]*\]):( <(?P<username>[^>]*)> )?(?P<message>.*)''')
-minecraftUserChange = re.compile(r' (?P<username>[a-zA-Z0-9_]{3,16})((?P<joined> joined the game)|(?P<left> left the game))')
+minecraftUserChange = re.compile(r' (?P<username>[a-zA-Z0-9_]{3,16})(?P<type>(?P<joined> joined the game)|(?P<left> left the game))')
 
 userCountRe = re.compile(r'[^\d]*(?P<online>\d+)[^\d]*(?P<max>\d+)')
 userCount = -1
@@ -269,7 +269,7 @@ async def read_minecraft_server():
 
             channel = client.get_channel(channelId)
             if channel is not None:
-                await channel.send(f"{nameToShow} {message}")
+                await channel.send(f"{nameToShow} {userChange.group("type")}")
 
 
 @client.event
