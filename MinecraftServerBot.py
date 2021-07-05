@@ -24,6 +24,7 @@ rconAddress = ""
 token = ""
 
 minecraftConsoleParser = re.compile(r'''(?P<timestamp>\[\d{2}:\d{2}:\d{2}\]) \[(?P<thread>[^]\/]*)\/(?P<level>[^]\/]*\]):( <(?P<username>[^>]*)> )?(?P<message>.*)''')
+minecraftUserChange = re.compile(r' (?P<username>[a-zA-Z0-9_]{3,16})((?P<joined> joined the game)|(?P<left> left the game))')
 
 userCountRe = re.compile(r'[^\d]*(?P<online>\d+)[^\d]*(?P<max>\d+)')
 userCount = -1
@@ -40,10 +41,6 @@ guilds = []
 
 displayedWrongPassword = False
 displayedChannelError = False
-
-async def run_async(func, args):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_executor, )
 
 def init_mcr():
     global mcr, displayedWrongPassword, isConnected
@@ -155,9 +152,11 @@ async def follow(filePath):
     logFP = None
     while True:
         if logFP is None and isConnected:
+            print("Opening file")
             logFP = open(filePath,'rt')
             logFP.seek(0,2)
         elif logFP is not None and not isConnected:
+            print("Closing file")
             logFP.close()
             logFP = None
 
@@ -256,6 +255,22 @@ async def read_minecraft_server():
                 elif not displayedChannelError:
                     print(f'[Error] Could not find specified channel with channel id {channelId}')
                     displayedChannelError = True
+        elif message is not None:
+            userChange = minecraftUserChange.fullmatch(message)
+            if userChange is None:
+                continue
+
+            username = userChange.group("username")
+            discordName = await mcToDc(username)
+            if discordName is None:
+                nameToShow = f"<{username}>"
+            else:
+                nameToShow = f"[{discordName}]"
+
+            channel = client.get_channel(channelId)
+            if channel is not None:
+                await channel.send(f"{nameToShow} {message}")
+
 
 @client.event
 async def on_ready():
