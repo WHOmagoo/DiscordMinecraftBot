@@ -121,7 +121,8 @@ async def update_user_count():
             except concurrent.futures.TimeoutError as e:
                 raise TimeoutError("MC RCON call timed out")
 
-            executor.shutdown(wait=False, cancel_futures=True)
+            # executor.shutdown(wait=False, cancel_futures=True)
+            executor.shutdown(wait=False)
 
             result = userCountRe.match(response)
             if result is not None and result.group('online') is not None and result.group('max') is not None:
@@ -139,7 +140,7 @@ async def update_user_count():
             if isConnected is None or isConnected:
                 print(f'[Error] update_user_count: {e}')
 
-    executor.shutdown(wait=False, cancel_futures=True)
+    executor.shutdown(wait=False)
 
     if failure:
         if isConnected is None or isConnected:
