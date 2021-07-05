@@ -269,7 +269,8 @@ async def read_minecraft_server():
 
             channel = client.get_channel(channelId)
             if channel is not None:
-                await channel.send(f"{nameToShow} {userChange.group("type")}")
+                connectionType = userChange.group("type")
+                await channel.send(f"{nameToShow}{connectionType}")
 
 
 @client.event
