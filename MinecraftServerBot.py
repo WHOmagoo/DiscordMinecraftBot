@@ -1,4 +1,6 @@
 import os
+import shutil
+from queue import Queue, Empty
 
 import discord
 from mcrcon import MCRcon
@@ -8,7 +10,7 @@ import re
 import json
 import traceback
 import concurrent.futures
-
+import subprocess
 
 import verifier
 from os.path import exists
@@ -107,6 +109,7 @@ async def idToDiscordNick(id):
 async def update_user_count():
     global userCount, userMax, isConnected
 
+    print("Updating user count")
     failure = True
     executor = concurrent.futures.ThreadPoolExecutor()
 
@@ -145,7 +148,25 @@ async def update_user_count():
         init_mcr()
 
 
+def enqueue_output(reader, queue):
+    while True:
+        line = reader.stdout.readline().rstrip()
+        queue.put(line)
 
+async def follow_tail(filePath):
+    tailPath = shutil.which("tail")
+    # with subprocess.Popen([tailPath, "-F", "-n", "100", filePath], stdout=subprocess.PIPE) as server_log:
+    with subprocess.Popen([tailPath, "-F", "-n", "0", filePath], stdout=subprocess.PIPE, encoding='ascii', bufsize=1, universal_newlines=True) as server_log:
+        q = Queue()
+        t = threading.Thread(target=enqueue_output, args=(server_log, q))
+        t.daemon = True
+        t.start()
+
+        while True:
+            try:
+                yield q.get_nowait()
+            except Empty:
+                await asyncio.sleep(0.1)
 
 async def follow(filePath):
 
@@ -199,7 +220,7 @@ def make_tellraw_for_code(username, code):
 
 async def read_minecraft_server():
     print("Reading minecraft output")
-    loglines = follow(pathToLogFile)
+    loglines = follow_tail(pathToLogFile)
 
     async for line in loglines:
         print(line)
@@ -277,9 +298,9 @@ async def read_minecraft_server():
 async def on_ready():
     print(f'{client.user} has connected to Discord!')
     global guilds
+
     asyncio.get_event_loop().create_task(read_minecraft_server())
     asyncio.get_event_loop().create_task(schedule(5, update_user_count))
-    # th = threading.Thread(target=read_minecraft_server)
 
 
 @client.event
