@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 PANENAME="discordminecraftbot"
 
 cd "$(dirname "$0")" ||  (echo "Couldn't change directory to script location"; exit)
