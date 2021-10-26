@@ -94,14 +94,13 @@ async def schedule(time, func, args=(), count=0):
         await asyncio.sleep(time)
 
 async def idToDiscordNick(id):
-    guildList = client.fetch_guilds(limit=2)
-    async for guild in guildList:
-        try:
-            member = await guild.fetch_member(id)
-            if member.nick is not None:
-                return member.nick
-        except:
-            pass
+    guild = client.get_channel(channelId).guild
+    try:
+        member = await guild.fetch_member(id)
+        if member.nick is not None:
+            return member.nick
+    except:
+        pass
 
     user = await client.fetch_user(id)
     return user.display_name
@@ -109,7 +108,6 @@ async def idToDiscordNick(id):
 async def update_user_count():
     global userCount, userMax, isConnected
 
-    print("Updating user count")
     failure = True
     executor = concurrent.futures.ThreadPoolExecutor()
 
