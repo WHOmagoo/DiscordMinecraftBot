@@ -1,7 +1,6 @@
 #!/bin/bash
 PANENAME="discordminecraftbot"
 
-
 cd "$(dirname "$0")" ||  (echo "Couldn't change directory to script location"; exit)
 tmux respawn-pane -k -t $PANENAME
 if [ $? -eq 0 ]
