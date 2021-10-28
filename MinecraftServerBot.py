@@ -27,6 +27,8 @@ token = ""
 
 minecraftConsoleParser = re.compile(r'''(?P<timestamp>\[\d{2}:\d{2}:\d{2}\]) \[(?P<thread>[^]\/]*)\/(?P<level>[^]\/]*\]):( <(?P<username>[^>]*)> )?(?P<message>.*)''')
 minecraftUserChange = re.compile(r' (?P<username>[a-zA-Z0-9_]{3,16})(?P<type>(?P<joined> joined the game)|(?P<left> left the game))')
+minecraftAFKPlayers = re.compile(r'Team \[AFK Players\] has [\d]+ member[s]?: (?P<usernames>(?:[a-zA-Z0-9_]{3,16}(?:, )?)+)')
+minecraftOnlinePlayers = re.compile(r'There are (?P<online>[1-9]\d?) of a max of (?P<max>\d+) players online: (?P<usernames>(?: [a-zA-Z0-9_]{3,16}(?:, )?)+)')
 
 userCountRe = re.compile(r'[^\d]*(?P<online>\d+)[^\d]*(?P<max>\d+)')
 userCount = -1
@@ -301,6 +303,26 @@ async def on_ready():
     asyncio.get_event_loop().create_task(schedule(5, update_user_count))
 
 
+async def list_players():
+    if mcr is not None:
+        response = mcr.command("list")
+        afk_players = mcr.command("team list afkDis.afk")
+        afk_match = minecraftAFKPlayers.match(afk_players)
+        if afk_match is not None:
+            afk_player_list = afk_match.group("usernames")
+            afk_player_split = afk_player_list.split(", ")
+            for player in afk_player_split:
+                player_match = "(" + player + ")(,|$)"
+                player_replace = r"~~\1~~\2"
+                response = re.sub(player_match, player_replace, response)
+
+        return response
+
+    return "Could not communicate with Server"
+
+
+
+
 @client.event
 async def on_message(message):
     msg = message.content
@@ -310,9 +332,8 @@ async def on_message(message):
     if message.author.id != botId:
         if message.channel.id == channelId or message.channel.type == discord.ChannelType.private:
             if msg == "!list":
-                if mcr is not None:
-                    response = mcr.command("list")
-                    await message.channel.send(response)
+                response = await list_players()
+                await message.channel.send(response)
             elif msg == "!verify":
                 pair = verifier.VerificationPair(discordProfile=message.author, onVerification=on_verification)
                 verifierMaster.add(pair)
