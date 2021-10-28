@@ -72,7 +72,7 @@ def init_mcr():
                 displayedWrongPassword = True
         return False
 
-def on_verification(pair):
+async def on_verification(pair):
     print("On Verification finished")
     outputLock.acquire()
     try:
@@ -84,6 +84,18 @@ def on_verification(pair):
             json.dump(userList, writer)
     finally:
         outputLock.release()
+
+    if mcr is not None:
+        try:
+            status_command = f'tellraw {mcid} [{{"text":"[Discord Bot]","color":"white"}},{{"text":" Account Successfully linked with [{pair.vDiscord.username}]","color":"green"}}]'
+            print(status_command)
+            mcr.command(status_command)
+        except:
+            print("Couldn't tellraw to user on verification")
+    try:
+        await pair.vDiscord.username.dm_channel.send(f"Account Successfully linked with <{mcid}>")
+    except Exception as e:
+        print("Couldn't dm user on verification")
 
 
 async def schedule(time, func, args=(), count=0):
@@ -215,8 +227,9 @@ async def dcToMc(dcName):
         traceback.print_exc(type(e), e, e.__traceback__)
         return None
 
-def make_tellraw_for_code(username, code):
-    return f'tellraw {username} [{{"text":"Verify your Discord account with the code ", "color":"white"}}, {{"text":"{code}", "color":"green"}}, {{"text":" by DMing it to the bot. Your code will expire in 5 minutes", "color":"white"}}]'
+def make_tellraw_for_code(username: str, code: str, firstMessage: bool) -> str:
+    again = "" if firstMessage else "one last time "
+    return f'tellraw {username} [{{"text":"[Discord Bot] Verify your Discord account {again}with the code ", "color":"white"}}, {{"text":"{code}", "color":"green"}}, {{"text":" by DMing it to the Discord Bot. Your code will expire in 5 minutes", "color":"white"}}]'
 
 async def read_minecraft_server():
     print("Reading minecraft output")
@@ -237,13 +250,13 @@ async def read_minecraft_server():
             if verifierMaster.hasCodes():
                 foundCodes = verifier.codeRe.findall(message)
                 for c in foundCodes:
-                    result = verifierMaster.verifyMinecraft(c, username)
+                    result = await verifierMaster.verifyMinecraft(c, username)
                     if result is not None:
                         if result.isCompleted():
-                            on_verification(result)
+                            await on_verification(result)
                         else:
                             try:
-                                result = mcr.command(make_tellraw_for_code(username, result.vDiscord.code))
+                                result = mcr.command(make_tellraw_for_code(username, result.vDiscord.code, False))
                                 print(result)
                             except Exception as e:
                                 print(f'[Error] failed to send verification message to {username}')
@@ -257,7 +270,8 @@ async def read_minecraft_server():
                 discordCode = pair.vDiscord.code
 
                 try:
-                    mcr.command(make_tellraw_for_code(username, discordCode))
+                    verify_tellraw = make_tellraw_for_code(username, discordCode, True)
+                    mcr.command(verify_tellraw)
                 except Exception as e:
                     print(f'[Error] failed to send verification message to {username}')
                     print(e)
@@ -339,19 +353,19 @@ async def on_message(message):
                 verifierMaster.add(pair)
                 minecraftCode = pair.vMinecraft.code
                 try:
-                    await message.author.send(f"verify your minecraft account with the code `{minecraftCode}`. Your code will expire in 5 minutes")
+                    await message.author.send(f"Verify your minecraft account. Send the code `{minecraftCode}` as part of any message on the Minecraft server. Your code will expire in 5 minutes")
                 except discord.errors.Forbidden as e:
                     await message.channel.send(e.text)
             else:
                 if verifierMaster.hasCodes():
                     foundCodes = verifier.codeRe.findall(msg)
                     for c in foundCodes:
-                        verifyResult = verifierMaster.verifyDiscord(c, message.author)
+                        verifyResult = await verifierMaster.verifyDiscord(c, message.author)
                         if verifyResult is not None:
                             if verifyResult.vMinecraft.verified:
-                                on_verification(verifyResult)
+                                await on_verification(verifyResult)
                             else:
-                                await message.author.send(f"verify your minecraft account with the code `{verifyResult.vMinecraft.code}`. Your code will expire in 5 minutes")
+                                await message.author.send(f"Verify your Minecraft account one last time. Send the code `{verifyResult.vMinecraft.code}` as part of any message on the Minecraft server. Your code will expire in 5 minutes")
 
         if message.channel.id == channelId:
             if mcr is not None:

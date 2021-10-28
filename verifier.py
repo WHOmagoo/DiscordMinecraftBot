@@ -112,14 +112,14 @@ class VerificationPair:
     def isCompleted(self):
         return (self.vDiscord is None or self.vDiscord.verified) and (self.vMinecraft is None or self.vMinecraft.verified)
 
-    def verify(self, code, username, enteredFromDiscord):
+    async def verify(self, code, username, enteredFromDiscord):
         verifier = self.vDiscord if enteredFromDiscord else self.vMinecraft
         result = verifier.verify_record(code, username)
 
         if result:
             other = self.vMinecraft if enteredFromDiscord else self.vDiscord
             if other.verified:
-                return self.onVerification(self)
+                return await self.onVerification(self)
             else:
                 other.refresh()
                 return other
@@ -155,18 +155,18 @@ class VerificationMaster:
         # return code in self.discordCodes or code in self.minecraftCodes
         return code in self.codePairs
 
-    def verify(self, code, username, fromDiscord):
-        result = code in self.codePairs and self.codePairs[code].verify(code, username, fromDiscord)
+    async def verify(self, code, username, fromDiscord):
+        result = code in self.codePairs and await self.codePairs[code].verify(code, username, fromDiscord)
         if result:
             return self.codePairs[code]
 
         return None
 
-    def verifyMinecraft(self, code, minecraftName):
-        return self.verify(code, minecraftName, False)
+    async def verifyMinecraft(self, code, minecraftName):
+        return await self.verify(code, minecraftName, False)
 
-    def verifyDiscord(self, code, discordProfile):
-        return self.verify(code, discordProfile, True)
+    async def verifyDiscord(self, code, discordProfile):
+        return await self.verify(code, discordProfile, True)
             # pair = self.discordCodes[code]
             # if pair.vDiscord.profile is None:
             #     pair.vDiscord.profile = discordProfile
